@@ -1,6 +1,7 @@
 from flask import Flask, request, render_template
 import os
 import torch
+import io
 import ast
 from torchvision import models, transforms
 from torchvision.models import resnet50, ResNet50_Weights
@@ -9,13 +10,8 @@ from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 
-# Configure upload folder and allowed extensions
-UPLOAD_FOLDER = 'uploads'
+# Configure allowed extensions
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-
-# Ensure upload folder exists
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # Function to load labels from the file
 def load_labels(label_file):
@@ -32,14 +28,13 @@ def allowed_file(filename):
 
 # Load a pre-trained PyTorch model
 def load_model():
-    # Use the new weights parameter to load the pre-trained model
     weights = ResNet50_Weights.DEFAULT
     model = resnet50(weights=weights)
     model.eval()
     return model
 
 # Preprocess the image and predict the class
-def detect_objects(image_path):
+def detect_objects(image_file):
     model = load_model()
 
     # Define the image transformations
@@ -50,19 +45,17 @@ def detect_objects(image_path):
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
 
-    # Open the image, convert to RGB, and apply transformations
-    img = Image.open(image_path).convert("RGB")
+    # Open the image from memory, convert to RGB, and apply transformations
+    img = Image.open(io.BytesIO(image_file.read())).convert("RGB")
     img = preprocess(img)
     img = img.unsqueeze(0)  # Add batch dimension
 
     with torch.no_grad():
         outputs = model(img)
 
-    # Get the predicted class ID
     _, predicted = torch.max(outputs, 1)
     predicted_class = predicted[0].item()
 
-    # Map the class ID to a human-readable label
     class_label = IMAGENET_LABELS.get(predicted_class, f"Unknown class ID: {predicted_class}")
 
     print(f"Predicted Class: {class_label}")
@@ -74,12 +67,9 @@ def upload_file():
     if request.method == 'POST':
         file = request.files['file']
         if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(file_path)
-            results = detect_objects(file_path)
+            results = detect_objects(file)
             return render_template('display.html', results=results)
     return render_template('upload.html')
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', debug=True)
+    app.run(host='0.0.0.0', port = 5000, debug=True)
